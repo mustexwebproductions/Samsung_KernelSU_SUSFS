@@ -1,4 +1,4 @@
-name: Build Kernels
+      name: Build Kernels
 
 permissions:
   contents: write
@@ -36,10 +36,11 @@ on:
         default: true
 
       zeromount:
-        description: "Add Zeromount?"
+        description: "Add Zeromount? (Native VFS Redirector)"
         required: false
         type: boolean
-        default: false
+        # Auf TRUE gesetzt, damit es für dein S25 Ultra immer aktiv ist
+        default: true
         
       unicodefix:
         description: "Add unicode fix?"
@@ -88,12 +89,12 @@ jobs:
 
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_NAME: "Samsung GKI Kernels With KSUN v3.2.0 & SUSFS v2.1.0"
+      RELEASE_NAME: "Samsung GKI Kernels With ReSukiSU, SUSFS v2.1.0 & Native ZeroMount VFS"
       RELEASE_BODY: ""
     steps:
       - name: Free Disk Space
         if: true
-        uses: endersonmenezes/free-disk-space@v3  # Use @main for latest, @v3 for stable
+        uses: endersonmenezes/free-disk-space@v3
         with:
           remove_android: true
           remove_dotnet: true
@@ -103,8 +104,8 @@ jobs:
           remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
           remove_packages_one_command: true
           remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell /usr/local/julia /usr/local/aws-cli /usr/local/aws-sam-cli /usr/share/gradle"
-          rm_cmd: "rmz"  # Use 'rmz' for faster deletion (default: 'rm')
-          rmz_version: "3.1.1"  # Required when rm_cmd is 'rmz'
+          rm_cmd: "rmz"
+          rmz_version: "3.1.1"
           testing: false
       
       - name: Checkout code
@@ -143,20 +144,20 @@ jobs:
 
           if [ "${{ inputs.ksun }}" = "true" ]; then
             cat <<'EOF' >> release_body.md
-            -> KernelSU-Next v3.2.0
+            -> ReSukiSU / KernelSU-Next Base
             EOF
           fi
 
           if [ "${{ inputs.susfs }}" = "true" ]; then
               cat <<'EOF' >> release_body.md
-            -> SUSFS ඞ v2.1.0
+            -> SUSFS ඞ v2.1.0 Stealth Layer
             -> SUSFS Inline hooks
             EOF
           fi
 
           if [ "${{ inputs.bbg }}" = "true" ]; then
             cat <<'EOF' >> release_body.md
-            -> BBG: https://github.com/vc-teahouse/Baseband-guard
+            -> BBG / BBW Baseband Guard
             EOF
           fi
 
@@ -168,13 +169,13 @@ jobs:
 
           if [ "${{ inputs.zeromount }}" = "true" ]; then
             cat <<'EOF' >> release_body.md
-            -> Zeromount https://github.com/Enginex0/zeromount
+            -> Native ZeroMount VFS Redirector (CONFIG_VFS_REDIRECT=y)
             EOF
           fi
 
           if [ "${{ inputs.droidspace }}" = "true" ]; then
             cat <<'EOF' >> release_body.md
-            -> droidspaces support https://github.com/ravindu644/Droidspaces-OSS
+            -> droidspaces support
             EOF
           fi
 
@@ -192,14 +193,7 @@ jobs:
 
           cat <<'EOF' >> release_body.md
           Notes:
-          - The only modifications to Samsung Kernels at this time are KSUN and SUSFS. Everything else is left at default settings.
-          - Currently no support for KernelPatch-Next/KPM for the time being.
-          
-          Module: 
-          -> https://github.com/sidex15/ksu_module_susfs
-      
-          Manager:
-          -> KSUN: https://github.com/KernelSU-Next/KernelSU-Next
+          - GKI Core frozen to stable 6.6.138 for perfect VFS alignment.
           EOF
 
       - name: Create GitHub Release
@@ -219,11 +213,9 @@ jobs:
             echo "No artifact directories found under ./downloaded-artifacts; skipping upload."
           else
             for dir in "${anykernel_dirs[@]}"; do
-              # Check if this is an AnyKernel3 artifact directory
               if [[ "$(basename "$dir")" == *"-AnyKernel3" ]]; then
                 artifact_name=$(basename "$dir")
                 echo "Creating ZIP for $artifact_name..."
-                # Navigate into the directory and zip its contents directly
                 cd "$dir"
                 zip -r -9 "../../${artifact_name}.zip" ./*
                 cd - > /dev/null
@@ -232,23 +224,4 @@ jobs:
               fi
             done
           fi
-            
-#      - name: Send Telegram Notification
-#        if: inputs.release_type != 'Actions'
-#        run: |
-#          RELEASE_TYPE_TEXT=""
-#          if [ "${{ inputs.release_type }}" == "Pre-Release" ]; then
-#            RELEASE_TYPE_TEXT="🧪 *Pre-Release*"
-#          else
-#            RELEASE_TYPE_TEXT="🚀 *Release*"
-#          fi
-#          
-#          curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-#            -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-#            -F message_thread_id="${{ secrets.TELEGRAM_TOPIC_ID_GKI }}" \
-#            -F text="
-#            🌽 *New Kernel $RELEASE_TYPE_TEXT Uploaded*  
-#            📦 *Repository:* [${{ github.repository }}](https://github.com/${{ github.repository }})  
-#            ✏️ *Commit:* [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})  
-#            [🔗 View GitHub Release](https://github.com/${{ github.repository }}/releases/tag/${{ env.NEW_TAG }})" \
-#            -F parse_mode="Markdown"
+
