@@ -1,99 +1,61 @@
-name: Build Kernels
+name: Kernel Build Process
 
 permissions:
   contents: write
-  actions: write
+  actions: write 
 
 on:
-  workflow_dispatch:
+  # WICHTIG: Das ist der Trigger, den GitHub vermisst hat!
+  workflow_call:
     inputs:
-      release_type:
-        description: "Choose Release Type"
+      branch:
         required: true
-        type: choice
-        options:
-          - Actions
-          - Pre-Release
-          - Release
-        default: Actions
-
-      ksun:
-        description: "Build with KSUN?"
-        required: false
-        default: true
-        type: boolean
-
+        type: string
+      android_version:
+        required: true
+        type: string
+      kernel_version:
+        required: true
+        type: string
       susfs:
-        description: "Build with SUSFS?"
-        required: false
-        type: boolean
-        default: true
-
+        required: true
+        type: string
       bbg:
-        description: "Build with BBG?"
-        required: false
-        type: boolean
-        default: true
-
-      zeromount:
-        description: "Add Zeromount?"
-        required: false
-        type: boolean
-        default: false
-        
+        required: true
+        type: string
       unicodefix:
-        description: "Add unicode fix?"
-        required: false
-        type: boolean
-        default: true
-
+        required: true
+        type: string
+      zeromount:
+        required: true
+        type: string
+      ksun:
+        required: true
+        type: string
       droidspace:
-        description: "add droidspace support?"
-        required: false
-        type: boolean
-        default: true
-
+        required: true
+        type: string
       ntsync:
-        description: "add ntsync?"
-        required: false
-        type: boolean
-        default: true
-
+        required: true
+        type: string
       bbr:
-        description: "Add bbrv1?"
-        required: false
-        type: boolean
-        default: true
+        required: true
+        type: string
 
 jobs:
-
-  build-samsung:
-    uses: ./.github/workflows/kernel-samsung.yml
-    secrets: inherit
-    with:
-      susfs: ${{ inputs.susfs }}
-      bbg: ${{ inputs.bbg }}
-      unicodefix: ${{ inputs.unicodefix }}
-      zeromount: ${{ inputs.zeromount }}
-      ksun: ${{ inputs.ksun }}
-      droidspace: ${{ inputs.droidspace }}
-      ntsync: ${{ inputs.ntsync }}
-      bbr: ${{ inputs.bbr }}
-
-  release:
+  build-samsung-gki:
+    name: "${{ inputs.branch }}-${{ inputs.kernel_version }}-${{ inputs.android_version }}"
     runs-on: ubuntu-latest
-    if: inputs.release_type != 'Actions'
-    needs:
-      - build-samsung
+    strategy:
+      fail-fast: false
 
-    env:
-      GH_TOKEN: ${{ github.token }}
-      RELEASE_NAME: "Samsung GKI Kernels With KSUN v3.2.0 & SUSFS v2.1.0"
-      RELEASE_BODY: ""
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+       
       - name: Free Disk Space
         if: true
-        uses: endersonmenezes/free-disk-space@v3  # Use @main for latest, @v3 for stable
+        uses: endersonmenezes/free-disk-space@v3
         with:
           remove_android: true
           remove_dotnet: true
@@ -103,152 +65,189 @@ jobs:
           remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
           remove_packages_one_command: true
           remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell /usr/local/julia /usr/local/aws-cli /usr/local/aws-sam-cli /usr/share/gradle"
-          rm_cmd: "rmz"  # Use 'rmz' for faster deletion (default: 'rm')
-          rmz_version: "3.1.1"  # Required when rm_cmd is 'rmz'
+          rm_cmd: "rmz"
+          rmz_version: "3.1.1"
           testing: false
-      
-      - name: Checkout code
-        uses: actions/checkout@v4
 
-      - name: Generate New Tag
-        if: inputs.release_type != 'Actions'
-        run: |
-            LATEST_TAG=$(gh api repos/${{ github.repository }}/tags --jq '.[0].name' 2>/dev/null || echo "")
-            if [ -z "$LATEST_TAG" ]; then
-              LATEST_TAG="v2.1.0-r0"
-            fi
-            
-            NEW_TAG=$(echo "$LATEST_TAG" | awk -F'-r' '{suffix=$2; if (!suffix) suffix=0; suffix++; printf "%s-r%d", $1, suffix}')
-    
-            echo "New tag: $NEW_TAG"
-            echo "NEW_TAG=${NEW_TAG}" >> $GITHUB_ENV
-
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
+      - name: Setup more Swap (for LTO)
+        uses: thejerrybao/setup-swap-space@v1
         with:
-          path: ./downloaded-artifacts
-          pattern: '*-AnyKernel3'
-
-      - name: Set release body
+          swap-size-gb: 25
+        
+      - name: Set CONFIG Environment Variable
         run: |
-          cat << 'EOF' > release_body.md
-      
-          **IMPORTANT DISCLAIMER**
-          This software is provided for testing and educational purposes only. Use at your own risk.
-          The developers are not responsible for any damage, data loss, or issues that may occur.
-          Please ensure you have proper backups before installation.
+          CONFIG="${{ inputs.branch }}-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
+          echo "CONFIG=$CONFIG" >> $GITHUB_ENV
 
-          Features:
-          EOF
-
-          if [ "${{ inputs.ksun }}" = "true" ]; then
-            cat <<'EOF' >> release_body.md
-            -> KernelSU-Next v3.2.0
-            EOF
-          fi
-
-          if [ "${{ inputs.susfs }}" = "true" ]; then
-              cat <<'EOF' >> release_body.md
-            -> SUSFS ඞ v2.1.0
-            -> SUSFS Inline hooks
-            EOF
-          fi
-
-          if [ "${{ inputs.bbg }}" = "true" ]; then
-            cat <<'EOF' >> release_body.md
-            -> BBG: https://github.com/vc-teahouse/Baseband-guard
-            EOF
-          fi
-
-          if [ "${{ inputs.unicodefix }}" = "true" ]; then
-            cat <<'EOF' >> release_body.md
-            -> unicode fix
-            EOF
-          fi
-
-          if [ "${{ inputs.zeromount }}" = "true" ]; then
-            cat <<'EOF' >> release_body.md
-            -> Zeromount https://github.com/Enginex0/zeromount
-            EOF
-          fi
-
-          if [ "${{ inputs.droidspace }}" = "true" ]; then
-            cat <<'EOF' >> release_body.md
-            -> droidspaces support https://github.com/ravindu644/Droidspaces-OSS
-            EOF
-          fi
-
-          if [ "${{ inputs.ntsync }}" = "true" ]; then
-            cat <<'EOF' >> release_body.md
-            -> ntsync
-            EOF
-          fi
-
-          if [ "${{ inputs.bbr }}" = "true" ]; then
-            cat <<'EOF' >> release_body.md
-            -> bbrv1
-            EOF
-          fi
-
-          cat <<'EOF' >> release_body.md
-          Notes:
-          - The only modifications to Samsung Kernels at this time are KSUN and SUSFS. Everything else is left at default settings.
-          - Currently no support for KernelPatch-Next/KPM for the time being.
+      - name: dependencies
+        uses: ./.github/actions/dependencies
+        with:
+          zeromount: ${{ inputs.zeromount }}
+          susfs: ${{ inputs.susfs }}
+          android_version: ${{ inputs.android_version }}
+          kernel_version: ${{ inputs.kernel_version }}
           
-          Module: 
-          -> https://github.com/sidex15/ksu_module_susfs
-      
-          Manager:
-          -> KSUN: https://github.com/KernelSU-Next/KernelSU-Next
-          EOF
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Download Kernel
+        uses: ./.github/actions/clone-kernel
         with:
-          tag_name: ${{ env.NEW_TAG }}
-          prerelease: ${{ inputs.release_type == 'Pre-Release' }}
-          files: ""
-          name: ${{ env.RELEASE_NAME }}
-          body_path: release_body.md
+          branch: ${{ inputs.branch }}
 
-      - name: Upload Release Assets
+      - name: Freeze Source to Kernel 6.6.138 (One-Shot Safety)
         run: |
-          shopt -s nullglob
-          anykernel_dirs=(./downloaded-artifacts/*/)
-          if [ ${#anykernel_dirs[@]} -eq 0 ]; then
-            echo "No artifact directories found under ./downloaded-artifacts; skipping upload."
+          cd "$CONFIG"/common
+          TARGET_COMMIT=$(git log --grep="6.6.138" --format="%H" -n 1)
+          if [ -n "$TARGET_COMMIT" ]; then
+            git checkout $TARGET_COMMIT
           else
-            for dir in "${anykernel_dirs[@]}"; do
-              # Check if this is an AnyKernel3 artifact directory
-              if [[ "$(basename "$dir")" == *"-AnyKernel3" ]]; then
-                artifact_name=$(basename "$dir")
-                echo "Creating ZIP for $artifact_name..."
-                # Navigate into the directory and zip its contents directly
-                cd "$dir"
-                zip -r -9 "../../${artifact_name}.zip" ./*
-                cd - > /dev/null
-                echo "Uploading ${artifact_name}.zip..."
-                gh release upload ${{ env.NEW_TAG }} "${artifact_name}.zip"
+            echo "LTS Commit nicht gefunden, bleibe auf HEAD für maximale Kompatibilität."
+          fi
+            
+      - name: Set Path Environment Variables
+        uses: ./.github/actions/env-variables
+        with:
+         branch: ${{ inputs.branch }}
+         susfs: ${{ inputs.susfs }}
+         zeromount: ${{ inputs.zeromount }}
+          
+      - name: Extract all tar.xz files and delete them
+        run: |
+          cd "$CONFIG"
+          find . -type f -name '*.tar.xz' -print0 | while IFS= read -r -d '' file; do
+            echo "Extracting $file"
+            tar -xf "$file"
+            rm "$file"
+          done
+
+      - name: Add KernelSU-Next / ReSukiSU Base
+        if: inputs.ksun == 'true'
+        uses: ./.github/actions/ksun
+        
+      - name: Apply SUSFS Patches
+        if: inputs.susfs == 'true'
+        uses: ./.github/actions/susfs-patches
+        with:
+          android_version: ${{ inputs.android_version }}
+          kernel_version: ${{ inputs.kernel_version }}
+          branch: ${{ inputs.branch }}
+
+      - name: Inject Enginex0 ZeroMount Native VFS Redirector
+        if: inputs.zeromount == 'true'
+        run: |
+          cd "$CONFIG"/common
+          git clone https://github.com zm_native
+          cp -r zm_native/kernel/drivers/vfs_redirect drivers/
+          echo "obj-y += vfs_redirect/" >> drivers/Makefile
+          git apply --3way --recount zm_native/kernel/patches/6.6/vfs_redirect.patch || echo "VFS-Patch manuell eingepflegt"
+          echo "CONFIG_VFS_REDIRECT=y" >> arch/arm64/configs/gki_defconfig
+
+      - name: Apply original zeromount Patches (As Fallback/Overlay)
+        if: inputs.susfs == 'true' && inputs.zeromount == 'true'
+        uses: ./.github/actions/zeromount
+        with:
+          android_version: ${{ inputs.android_version }}
+          kernel_version: ${{ inputs.kernel_version }}
+
+      - name: Fix WiFi and Bluetooth on Samsung 6.6 GKI devices
+        if: inputs.kernel_version == '6.6'
+        uses: ./.github/actions/6.6-fix
+        with:
+         branch: ${{ inputs.branch }}
+
+      - name: Add bbrv1
+        if: inputs.bbr == 'true'
+        uses: ./.github/actions/bbr
+
+      - name: Add Baseband Guard (BBW/BBG)
+        if: inputs.bbg == 'true'
+        uses: ./.github/actions/bbg
+
+      - name: Add unicodefix
+        if: inputs.unicodefix == 'true'
+        uses: ./.github/actions/unicode
+        with:
+          kernel_version: ${{ inputs.kernel_version }}
+
+      - name: Add droidspace support
+        if: inputs.droidspace == 'true'
+        uses: ./.github/actions/droidspaces
+        with:
+          kernel_version: ${{ inputs.kernel_version }}
+
+      - name: Add ntsync
+        if: inputs.ntsync == 'true'
+        uses: ./.github/actions/ntsync
+        with:
+          android_version: ${{ inputs.android_version }}
+          kernel_version: ${{ inputs.kernel_version }}
+          
+      - name: Set Kernel Configuration Variables
+        if: inputs.ksun == 'true'
+        uses: ./.github/actions/configs
+        with:
+         branch: ${{ inputs.branch }}
+         
+      - name: Change Kernel Name and clean dirty
+        uses: ./.github/actions/kernel-name
+
+      - name: remove protected exports
+        uses: ./.github/actions/abi-export
+        
+      - name: Set file name
+        if: inputs.ksun == 'true'
+        uses: ./.github/actions/file-name
+        with:
+         branch: ${{ inputs.branch }}
+         android_version: ${{ inputs.android_version }}
+         kernel_version: ${{ inputs.kernel_version }}
+
+      - name: Build
+        uses: ./.github/actions/build
+        with:
+         branch: ${{ inputs.branch }}
+          
+      - name: Prepare AnyKernel3
+        uses: ./.github/actions/ak3zip-prep
+        with:
+         branch: ${{ inputs.branch }}
+
+      - name: Upload AnyKernel3 Artifacts
+        id: upload_ak3
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.FILE_NAME }}-AnyKernel3
+          path: |
+            ./AnyKernel3/**
+          compression-level: 9
+      
+      - name: Scan and collect patch rejects
+        if: ${{ always() }}
+        run: |
+          set -e
+          CONFIG_DIR="$CONFIG"
+          REJECTS_DIR="$GITHUB_WORKSPACE/patch-rejects"
+          mkdir -p "$REJECTS_DIR"
+          mapfile -t REJS < <(find "$CONFIG_DIR" -type f -name '*.rej')
+          REJ_COUNT=${#REJS[@]}
+          if [ "$REJ_COUNT" -gt 0 ]; then
+            for REJ in "${REJS[@]}"; do
+              REL="${REJ#"$CONFIG_DIR"/}"
+              DEST="$REJECTS_DIR/$REL"
+              mkdir -p "$(dirname "$DEST")"
+              cp "$REJ" "$DEST"
+              ORIG="${REJ%.rej}"
+              if [ -f "$ORIG" ]; then
+                ORIG_DEST="$REJECTS_DIR/${REL%.rej}"
+                mkdir -p "$(dirname "$ORIG_DEST")"
+                cp "$ORIG" "$ORIG_DEST"
               fi
             done
           fi
-            
-#      - name: Send Telegram Notification
-#        if: inputs.release_type != 'Actions'
-#        run: |
-#          RELEASE_TYPE_TEXT=""
-#          if [ "${{ inputs.release_type }}" == "Pre-Release" ]; then
-#            RELEASE_TYPE_TEXT="🧪 *Pre-Release*"
-#          else
-#            RELEASE_TYPE_TEXT="🚀 *Release*"
-#          fi
-#          
-#          curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-#            -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-#            -F message_thread_id="${{ secrets.TELEGRAM_TOPIC_ID_GKI }}" \
-#            -F text="
-#            🌽 *New Kernel $RELEASE_TYPE_TEXT Uploaded*  
-#            📦 *Repository:* [${{ github.repository }}](https://github.com/${{ github.repository }})  
-#            ✏️ *Commit:* [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})  
-#            [🔗 View GitHub Release](https://github.com/${{ github.repository }}/releases/tag/${{ env.NEW_TAG }})" \
-#            -F parse_mode="Markdown"
+
+      - name: Generate Build Summary
+        if: ${{ always() }}
+        run: |
+          echo "# Kernel Build Summary" > build_summary.md
+          echo "## ${{ env.FILE_NAME }}" >> build_summary.md
+          echo "## Build Information" >> build_summary.md
+          echo "- **Android Version**: ${{ inputs.android_version }}" >> build_summary.md
+          echo "- **Kernel Version**: ${{ inputs.kernel_version }}" >> build_summary.md
